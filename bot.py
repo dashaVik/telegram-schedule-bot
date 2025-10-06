@@ -4,11 +4,9 @@ import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 
-# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Получаем токен из переменных окружения
 API_TOKEN = os.getenv('API_TOKEN')
 
 if not API_TOKEN:
@@ -183,18 +181,13 @@ async def handle_other_messages(message: types.Message):
     await message.answer("Пожалуйста, используйте кнопки для выбора недели или команду /start")
 
 async def main():
-    logger.info("Запуск бота...")
-    
-    # Проверяем подключение
+    logger.info("🚀 Запуск бота на Render...")
     try:
         bot_info = await bot.get_me()
-        logger.info(f"Бот @{bot_info.username} успешно подключен!")
+        logger.info(f"✅ Бот @{bot_info.username} успешно запущен!")
+        await dp.start_polling(bot)
     except Exception as e:
-        logger.error(f"Ошибка подключения: {e}")
-        return
-    
-    # Запускаем поллинг
-    await dp.start_polling(bot)
+        logger.error(f"❌ Ошибка: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
