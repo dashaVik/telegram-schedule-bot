@@ -1,12 +1,16 @@
 import os
 import asyncio
 import logging
+import json
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from pathlib import Path
 
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Получаем токен из переменных окружения
 API_TOKEN = os.getenv('API_TOKEN')
 
 if not API_TOKEN:
@@ -16,8 +20,39 @@ if not API_TOKEN:
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
+# Файл для хранения ID пользователей
+USERS_FILE = Path("users.json")
+
+# Загрузка списка пользователей
+def load_users():
+    if USERS_FILE.exists():
+        try:
+            with open(USERS_FILE, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        except Exception as e:
+            logger.error(f"Ошибка загрузки users.json: {e}")
+    return set()
+
+# Сохранение списка пользователей
+def save_users(users):
+    try:
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(list(users), f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Ошибка сохранения users.json: {e}")
+
+# Глобальный набор для хранения ID пользователей
+user_ids = load_users()
+
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
+    # Добавляем пользователя в список
+    user_id = message.from_user.id
+    if user_id not in user_ids:
+        user_ids.add(user_id)
+        save_users(user_ids)
+        logger.info(f"Добавлен новый пользователь: {user_id}")
+    
     kb = [
         [types.KeyboardButton(text="06.10 - 10.10 II неделя")],
         [types.KeyboardButton(text="13.10 - 17.10 I неделя")],
@@ -31,6 +66,56 @@ async def send_welcome(message: types.Message):
     )
     await message.answer("👋 Привет! Я помогу тебе узнать расписание 🗓", reply_markup=keyboard)
 
+@dp.message(Command("broadcast"))
+async def broadcast_command(message: types.Message):
+    # Проверяем, является ли пользователь администратором
+    # Для простоты проверяем по ID, можно добавить список админов в переменные окружения
+    ADMIN_IDS = os.getenv('ADMIN_IDS', '').split(',')
+    
+    if str(message.from_user.id) not in ADMIN_IDS and message.from_user.id != message.from_user.id:  # Замените на проверку своего ID
+        await message.answer("❌ У вас нет прав для использования этой команды.")
+        return
+    
+    # Получаем текст рассылки (всё после команды /broadcast)
+    broadcast_text = message.text.replace('/broadcast', '').strip()
+    
+    if not broadcast_text:
+        await message.answer("❌ Использование: /broadcast <текст сообщения>")
+        return
+    
+    await message.answer(f"🔄 Начинаю рассылку для {len(user_ids)} пользователей...")
+    
+    success_count = 0
+    fail_count = 0
+    
+    # Рассылаем сообщение всем пользователям
+    for user_id in user_ids.copy():  # Используем копию для безопасной итерации
+        try:
+            await bot.send_message(user_id, f"📢 <b>Важное обновление расписания:</b>\n\n{broadcast_text}", parse_mode="HTML")
+            success_count += 1
+            # Небольшая задержка чтобы не превысить лимиты Telegram
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            logger.error(f"Ошибка отправки пользователю {user_id}: {e}")
+            fail_count += 1
+            # Удаляем невалидного пользователя из списка
+            user_ids.discard(user_id)
+    
+    save_users(user_ids)  # Сохраняем обновленный список
+    await message.answer(f"✅ Рассылка завершена!\nУспешно: {success_count}\nНе удалось: {fail_count}")
+
+@dp.message(Command("stats"))
+async def stats_command(message: types.Message):
+    # Проверка прав администратора (аналогично broadcast_command)
+    ADMIN_IDS = os.getenv('ADMIN_IDS', '').split(',')
+    
+    if str(message.from_user.id) not in ADMIN_IDS and message.from_user.id != message.from_user.id:  # Замените на проверку своего ID
+        await message.answer("❌ У вас нет прав для использования этой команды.")
+        return
+    
+    await message.answer(f"📊 Статистика бота:\nПользователей: {len(user_ids)}")
+
+# Остальные обработчики сообщений остаются без изменений
 @dp.message(lambda message: message.text == "06.10 - 10.10 II неделя")
 async def handle_week1(message: types.Message):
     schedule_text = """
@@ -181,13 +266,19 @@ async def handle_other_messages(message: types.Message):
     await message.answer("Пожалуйста, используйте кнопки для выбора недели или команду /start")
 
 async def main():
-    logger.info("🚀 Запуск бота на Render...")
+    logger.info("Запуск бота...")
+    logger.info(f"Загружено {len(user_ids)} пользователей")
+    
+    # Проверяем подключение
     try:
         bot_info = await bot.get_me()
-        logger.info(f"✅ Бот @{bot_info.username} успешно запущен!")
-        await dp.start_polling(bot)
+        logger.info(f"Бот @{bot_info.username} успешно подключен!")
     except Exception as e:
-        logger.error(f"❌ Ошибка: {e}")
+        logger.error(f"Ошибка подключения: {e}")
+        return
+    
+    # Запускаем поллинг
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
