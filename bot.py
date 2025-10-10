@@ -277,10 +277,7 @@ async def main():
         logger.error(f"Ошибка подключения: {e}")
         return
     
-    # Удаляем вебхук если он был установлен (важно для Render)
-    await bot.delete_webhook(drop_pending_updates=True)
-    
-    # Запускаем поллинг
+    # Для Render с вебхуками
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
